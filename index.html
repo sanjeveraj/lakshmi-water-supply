@@ -1,352 +1,463 @@
 <!DOCTYPE html>
+<!--
+  LAKSHMI WATER SUPPLY — Delivery Log (internal use)
+  ===================================================
+  This is a quick delivery-logging tool for you to use while doing
+  deliveries — not a public order form. Add each customer once, then
+  just pick them from the list and log each delivery in a few taps.
+
+  SETUP:
+
+  1. Create a free project at https://supabase.com
+  2. In the SQL Editor, run:
+
+     create table customers (
+       id uuid primary key default gen_random_uuid(),
+       created_at timestamptz default now(),
+       name text not null,
+       phone text,
+       address text
+     );
+
+     create table deliveries (
+       id uuid primary key default gen_random_uuid(),
+       created_at timestamptz default now(),
+       customer_id uuid references customers(id) on delete set null,
+       customer_name text not null,
+       can_price int not null,
+       quantity int not null default 1,
+       total int generated always as (can_price * quantity) stored,
+       delivery_date date not null default current_date
+     );
+
+     alter table customers enable row level security;
+     alter table deliveries enable row level security;
+
+     create policy "allow all on customers" on customers
+       for all to anon using (true) with check (true);
+     create policy "allow all on deliveries" on deliveries
+       for all to anon using (true) with check (true);
+
+     -- NOTE: this gives full read/write access to anyone who has this
+     -- page's link, since there is no login. That's fine as long as
+     -- you keep the link to yourself. If you ever share it with staff,
+     -- or worry about it leaking, tell me and I'll add a passcode or
+     -- real login.
+
+  3. In Project Settings → API, copy your "Project URL" and "anon
+     public" key, and paste them into SUPABASE_URL / SUPABASE_ANON_KEY
+     below (search for "PASTE YOUR").
+-->
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
-<title>💧 WaterSupply Manager</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta name="theme-color" content="#0A4F58">
+<title>Lakshmi Water Supply — Delivery Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-:root{--bg:#060E1C;--surface:#0B1829;--card:rgba(255,255,255,0.04);--border:rgba(255,255,255,0.08);--cyan:#22D3EE;--amber:#FBBF24;--green:#4ADE80;--red:#F87171;--wa:#25D366;--text:#E2F0FB;--sub:#6A96B8;--muted:#314E68;}
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-html,body,#root{height:100%;background:var(--bg);}
-body{font-family:'DM Sans',sans-serif;color:var(--text);overscroll-behavior:none;}
-input,select,button,textarea{font-family:'DM Sans',sans-serif;}
-input,select,textarea{-webkit-user-select:text!important;user-select:text!important;touch-action:manipulation;}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--cyan)!important;outline-offset:-1px;}
-input[type=date]::-webkit-calendar-picker-indicator,input[type=month]::-webkit-calendar-picker-indicator{filter:invert(0.6);}
-select option{background:#0B1829;color:#E2F0FB;}
-::-webkit-scrollbar{width:3px;}
-::-webkit-scrollbar-thumb{background:#1E3A5F;border-radius:2px;}
-@keyframes slideUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes spin{to{transform:rotate(360deg)}}
-.su{animation:slideUp 0.28s cubic-bezier(.22,.68,0,1.2) forwards;}
-.fi{animation:fadeIn 0.2s ease forwards;}
-.spin{animation:spin 0.8s linear infinite;}
-.sheet{background:var(--surface);border-radius:22px 22px 0 0;padding:0 0 44px;width:100%;max-width:480px;border:1px solid var(--border);border-bottom:none;max-height:94vh;overflow-y:auto;-webkit-overflow-scrolling:touch;}
-.sheet-handle{width:38px;height:4px;background:rgba(255,255,255,0.15);border-radius:2px;margin:14px auto 0;}
-.sheet-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0;}
-.sheet-body{padding:0 20px;}
-.field{margin-bottom:16px;}
-.field label{display:block;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--sub);margin-bottom:8px;}
-.finput{width:100%;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:13px;padding:16px 15px;color:var(--text);font-size:16px;display:block;-webkit-appearance:none;appearance:none;transition:border-color .15s;}
-.finput:focus{border-color:var(--cyan)!important;outline:none!important;background:rgba(34,211,238,0.06);}
-.btn{border:none;border-radius:13px;padding:15px 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity .15s,transform .1s;display:inline-flex;align-items:center;justify-content:center;gap:7px;}
-.btn:active{transform:scale(0.97);opacity:0.85;}
-.card{background:var(--card);border:1px solid var(--border);border-radius:15px;padding:15px 16px;}
-.badge{display:inline-flex;align-items:center;border-radius:7px;padding:3px 9px;font-size:11px;font-weight:700;}
-.loader{display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;gap:16px;}
-.loader-ring{width:48px;height:48px;border:3px solid rgba(34,211,238,0.2);border-top-color:#22D3EE;border-radius:50%;}
+  :root{
+    --ink:#0A2E36;
+    --teal:#106B77;
+    --teal-light:#3FA7B3;
+    --teal-dark:#08343C;
+    --copper:#C97D3C;
+    --mist:#EEF6F6;
+    --white:#FFFFFF;
+    --danger:#B3402F;
+    --line:#DCE9E8;
+    --radius:18px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--mist);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    font-feature-settings:'tnum' 1;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  h1,h2,h3{ font-family:'Fraunces',serif; margin:0; color:var(--teal-dark); }
+
+  .wrap{ max-width:480px; margin:0 auto; padding:0 18px 48px; }
+
+  .topbar{
+    position:sticky; top:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    gap:12px; padding:14px 18px;
+    background:rgba(238,246,246,0.92);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark svg{ width:32px; height:32px; display:block; }
+  .brand-eyebrow{ margin:0; font-size:11px; letter-spacing:.03em; color:var(--teal); font-weight:600; }
+  .brand h1{ font-size:18px; line-height:1.1; font-weight:600; }
+
+  .stat-strip{ display:flex; gap:10px; margin:20px 0 20px; }
+  .stat-box{ flex:1; background:var(--white); border:1px solid var(--line); border-radius:14px; padding:13px 14px; text-align:center; }
+  .stat-box .num{ font-family:'Fraunces',serif; font-size:22px; font-weight:600; color:var(--teal-dark); }
+  .stat-box .label{ font-size:11.5px; color:#5b7a7d; margin-top:2px; }
+
+  .card{
+    background:var(--white); border-radius:var(--radius);
+    padding:20px 20px 22px; box-shadow:0 10px 30px -14px rgba(10,46,54,0.2);
+    border:1px solid var(--line);
+  }
+
+  .section-title{ font-size:12.5px; font-weight:700; letter-spacing:.03em; color:var(--teal); text-transform:uppercase; margin:0 0 10px; }
+
+  input[type=text], input[type=tel], input[type=date], select{
+    width:100%; font-family:'Inter',sans-serif; font-size:16px; color:var(--ink);
+    background:var(--mist); border:1.5px solid var(--line); border-radius:12px;
+    padding:12px 13px; outline:none; transition:border-color .15s ease;
+  }
+  input:focus, select:focus{ border-color:var(--teal); }
+  select{ appearance:none; -webkit-appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9'><path d='M1 1l6 6 6-6' stroke='%23106B77' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat; background-position:right 13px center;
+  }
+
+  .customer-row{ display:flex; gap:10px; align-items:center; margin-bottom:16px; }
+  .customer-row select{ flex:1; }
+  .add-customer-btn{
+    flex-shrink:0; background:var(--mist); border:1.5px solid var(--line); border-radius:12px;
+    width:44px; height:44px; font-size:20px; font-weight:700; color:var(--teal-dark); cursor:pointer;
+  }
+  .add-customer-btn:active{ transform:scale(.95); }
+
+  .new-customer-form{ display:none; background:var(--mist); border:1.5px dashed var(--line); border-radius:14px; padding:14px; margin-bottom:16px; }
+  .new-customer-form.show{ display:block; }
+  .new-customer-form input{ margin-bottom:10px; background:var(--white); }
+  .new-customer-form .row-btns{ display:flex; gap:10px; }
+  .new-customer-form .row-btns button{ flex:1; }
+  .save-customer-btn{ background:var(--teal-dark); color:#fff; border:none; border-radius:10px; padding:11px; font-weight:700; font-size:14px; cursor:pointer; }
+  .cancel-btn{ background:none; border:1.5px solid var(--line); border-radius:10px; padding:11px; font-weight:600; font-size:14px; color:#3A5B60; cursor:pointer; }
+
+  .price-buttons{ display:flex; gap:10px; margin-top:2px; }
+  .price-btn{ flex:1; padding:14px 0; border-radius:12px; border:1.5px solid var(--line); background:var(--mist); font-family:'Fraunces',serif; font-size:18px; font-weight:600; color:var(--teal-dark); cursor:pointer; }
+  .price-btn.active{ background:var(--teal-dark); border-color:var(--teal-dark); color:#fff; }
+
+  .stepper{ display:flex; align-items:center; justify-content:space-between; max-width:140px; background:var(--mist); border:1.5px solid var(--line); border-radius:12px; padding:4px; }
+  .stepper button{ width:38px; height:38px; border-radius:9px; border:none; background:var(--white); color:var(--teal-dark); font-size:19px; font-weight:700; cursor:pointer; box-shadow:0 1px 2px rgba(10,46,54,.15); }
+  .stepper button:active{ transform:scale(.93); }
+  .stepper span{ font-size:17px; font-weight:700; min-width:24px; text-align:center; }
+
+  .date-input-wrap{ margin-top:16px; }
+  .date-input-wrap label{ display:block; font-size:12px; font-weight:600; color:#3A5B60; margin-bottom:6px; }
+
+  .error{ color:var(--danger); font-size:13.5px; font-weight:600; margin:10px 0 0; min-height:0; }
+  .error:empty{ display:none; margin:0; }
+
+  .submit-btn{
+    width:100%; border:none; cursor:pointer;
+    background:linear-gradient(180deg, var(--teal) 0%, var(--teal-dark) 100%);
+    color:var(--white); font-family:'Inter',sans-serif; font-size:16px; font-weight:700;
+    padding:15px; border-radius:13px; box-shadow:0 8px 20px -8px rgba(8,52,60,.55);
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .submit-btn:active{ transform:scale(.985); }
+  .submit-btn[disabled]{ opacity:.65; pointer-events:none; }
+  .spinner{ width:16px; height:16px; border-radius:50%; border:2.5px solid rgba(255,255,255,.4); border-top-color:#fff; animation:spin .7s linear infinite; display:none; }
+  .submit-btn.loading .spinner{ display:inline-block; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .log-list{ margin-top:10px; }
+  .log-item{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--line); }
+  .log-item:last-child{ border-bottom:none; }
+  .who{ font-weight:700; font-size:14.5px; }
+  .meta{ font-size:12.5px; color:#5b7a7d; margin-top:2px; }
+  .amt{ font-weight:700; color:var(--teal-dark); font-size:15px; }
+  .del{ background:none; border:none; color:var(--danger); font-size:16px; cursor:pointer; margin-left:10px; padding:4px; }
+  .empty-note{ font-size:13.5px; color:#5b7a7d; padding:6px 0; }
+
+  .toast{
+    position:fixed; left:50%; bottom:24px; transform:translate(-50%, 20px);
+    background:var(--teal-dark); color:#fff; padding:12px 20px; border-radius:999px;
+    font-size:14px; font-weight:600; opacity:0; pointer-events:none;
+    transition:all .25s ease; z-index:60; white-space:nowrap;
+  }
+  .toast.show{ opacity:1; transform:translate(-50%,0); }
 </style>
 </head>
-<body><div id="root"></div>
-<script type="text/babel">
-const {useState,useMemo,useEffect,useCallback} = React;
+<body>
 
-/* ══ SUPABASE CONFIG ══ */
-const SUPA_URL = 'https://negosgsjiniutnejytye.supabase.co/rest/v1/';
-const SUPA_KEY = 'sb_publishable_lgmS1R7tP3g0NWcd5DgLng_6rwtnHf0';
-const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
-
-/* ══ HELPERS ══ */
-const todayStr = new Date().toISOString().split('T')[0];
-const monthStr = new Date().toISOString().slice(0,7);
-const mc = {Cash:'#4ADE80',UPI:'#22D3EE',Online:'#FBBF24'};
-const fmtDate  = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '';
-const fmtMonth = m => new Date(m+'-01').toLocaleDateString('en-IN',{month:'long',year:'numeric'});
-let _uid=100; const uid=()=>++_uid;
-
-function App() {
-  /* ══ DATA STATE ══ */
-  const [custs,  setCusts]  = useState([]);
-  const [dels,   setDels]   = useState([]);
-  const [pays,   setPays]   = useState([]);
-  const [qrImg,  setQrImg]  = useState('');
-  const [upiId,  setUpiId]  = useState('');
-  const [loading,setLoading]= useState(true);
-  const [syncing,setSyncing]= useState(false);
-
-  /* ══ UI STATE ══ */
-  const [page,   setPage]   = useState('dashboard');
-  const [modal,  setModal]  = useState(null);
-  const [search, setSearch] = useState('');
-  const [month,  setMonth]  = useState(monthStr);
-  const [toast,  setToast]  = useState(null);
-  const [waModal,setWaModal]= useState(null);
-  const [qrView, setQrView] = useState(false);
-
-  /* ══ FORM STATE — top level prevents keyboard close ══ */
-  const [cId,    setCId]   = useState(null);
-  const [cName,  setCName] = useState('');
-  const [cPhone, setCPhone]= useState('');
-  const [cAddr,  setCAddr] = useState('');
-  const [cPrice, setCPrice]= useState('35');
-  const [cAct,   setCAt]   = useState(true);
-  const [dId,    setDId]   = useState(null);
-  const [dCust,  setDCust] = useState('');
-  const [dCans,  setDCans] = useState('1');
-  const [dDate,  setDDate] = useState(todayStr);
-  const [pCust,  setPCust] = useState('');
-  const [pAmt,   setPAmt]  = useState('');
-  const [pDate,  setPDate] = useState(todayStr);
-  const [pMeth,  setPMeth] = useState('Cash');
-
-  const toast_ = (msg,color='#4ADE80') => {setToast({msg,color});setTimeout(()=>setToast(null),2500);};
-
-  /* ══ LOAD ALL DATA ══ */
-  const loadAll = async () => {
-    setLoading(true);
-    try {
-      const [c,d,p,s] = await Promise.all([
-        sb.from('customers').select('*').order('name'),
-        sb.from('deliveries').select('*').order('date',{ascending:false}),
-        sb.from('payments').select('*').order('date',{ascending:false}),
-        sb.from('settings').select('*'),
-      ]);
-      if(c.data) setCusts(c.data);
-      if(d.data) setDels(d.data);
-      if(p.data) setPays(p.data);
-      if(s.data){
-        const qr  = s.data.find(x=>x.key==='qr_b64');
-        const upi = s.data.find(x=>x.key==='upi_id');
-        if(qr)  setQrImg(qr.value);
-        if(upi) setUpiId(upi.value);
-      }
-    } catch(e) { toast_('Connection error. Try again.','#F87171'); }
-    setLoading(false);
-  };
-
-  useEffect(()=>{ loadAll(); },[]);
-
-  /* ══ STATS ══ */
-  const stats = useMemo(()=>{
-    const m={};
-    custs.forEach(c=>{m[c.id]={cans:0,amount:0,paid:0};});
-    dels.forEach(d=>{if(m[d.customer_id]){m[d.customer_id].cans+=d.cans;m[d.customer_id].amount+=Number(d.amount);}});
-    pays.forEach(p=>{if(m[p.customer_id]) m[p.customer_id].paid+=Number(p.amount);});
-    Object.keys(m).forEach(id=>{m[id].pending=m[id].amount-m[id].paid;});
-    return m;
-  },[custs,dels,pays]);
-
-  const dash = useMemo(()=>{
-    const td=dels.filter(d=>d.date===todayStr);
-    return {
-      active:custs.filter(c=>c.active).length,
-      todayCans:td.reduce((s,d)=>s+d.cans,0),
-      todayTrips:td.length,
-      todayIncome:td.reduce((s,d)=>s+Number(d.amount),0),
-      totalPending:Object.values(stats).reduce((s,st)=>s+Math.max(0,st.pending),0),
-    };
-  },[custs,dels,stats]);
-
-  const pendingCusts = custs.filter(c=>(stats[c.id]?.pending||0)>0);
-  const filtered = useMemo(()=>custs.filter(c=>
-    c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)
-  ),[custs,search]);
-
-  const monthData = useMemo(()=>{
-    const [yr,mo]=month.split('-');
-    return custs.map(c=>{
-      const md=dels.filter(d=>d.customer_id===c.id&&d.date?.startsWith(`${yr}-${mo}`));
-      const mp=pays.filter(p=>p.customer_id===c.id&&p.date?.startsWith(`${yr}-${mo}`));
-      const amt=md.reduce((s,d)=>s+Number(d.amount),0);
-      const paid=mp.reduce((s,p)=>s+Number(p.amount),0);
-      return {c,cans:md.reduce((s,d)=>s+d.cans,0),amt,paid,pending:amt-paid};
-    }).filter(r=>r.cans>0||r.paid>0);
-  },[custs,dels,pays,month]);
-
-  /* ══ CUSTOMER ACTIONS ══ */
-  const openAddCust=()=>{setCId(null);setCName('');setCPhone('');setCAddr('');setCPrice('35');setCAt(true);setModal('cust');};
-  const openEditCust=c=>{setCId(c.id);setCName(c.name);setCPhone(c.phone);setCAddr(c.address||'');setCPrice(String(c.price_per_can));setCAt(c.active);setModal('cust');};
-
-  const saveCust=async()=>{
-    if(!cName.trim()||!cPhone.trim()){toast_('பெயர் & Phone கட்டாயம்','#FBBF24');return;}
-    setSyncing(true);
-    const data={name:cName,phone:cPhone,address:cAddr,price_per_can:+cPrice,active:cAct};
-    if(cId){
-      const {data:r}=await sb.from('customers').update(data).eq('id',cId).select().single();
-      if(r) setCusts(p=>p.map(c=>c.id===cId?r:c));
-      toast_('Customer updated ✓');
-    } else {
-      const {data:r}=await sb.from('customers').insert(data).select().single();
-      if(r) setCusts(p=>[...p,r].sort((a,b)=>a.name.localeCompare(b.name)));
-      toast_('Customer added ✓');
-    }
-    setSyncing(false); setModal(null);
-  };
-
-  const toggleActive=async(c)=>{
-    const {data:r}=await sb.from('customers').update({active:!c.active}).eq('id',c.id).select().single();
-    if(r) setCusts(p=>p.map(x=>x.id===c.id?r:x));
-  };
-
-  /* ══ DELIVERY ACTIONS ══ */
-  const openAddDel=()=>{setDId(null);setDCust('');setDCans('1');setDDate(todayStr);setModal('del');};
-  const openEditDel=d=>{setDId(d.id);setDCust(String(d.customer_id));setDCans(String(d.cans));setDDate(d.date);setModal('del');};
-
-  const saveDel=async()=>{
-    if(!dCust||!dCans){toast_('எல்லாம் fill பண்ணுங்க','#FBBF24');return;}
-    const cust=custs.find(c=>c.id===+dCust);
-    const amount=cust.price_per_can*+dCans;
-    const time=new Date().toTimeString().slice(0,5);
-    setSyncing(true);
-    if(dId){
-      const {data:r}=await sb.from('deliveries').update({customer_id:+dCust,cans:+dCans,amount,date:dDate}).eq('id',dId).select().single();
-      if(r) setDels(p=>p.map(d=>d.id===dId?r:d));
-      toast_(`Delivery updated ₹${amount} ✓`);
-    } else {
-      const {data:r}=await sb.from('deliveries').insert({customer_id:+dCust,cans:+dCans,amount,date:dDate,time}).select().single();
-      if(r) setDels(p=>[r,...p]);
-      toast_(`Delivery saved ₹${amount} ✓`);
-    }
-    setSyncing(false); setModal(null);
-  };
-
-  const delDelivery=async(id)=>{
-    await sb.from('deliveries').delete().eq('id',id);
-    setDels(p=>p.filter(d=>d.id!==id));
-    toast_('Deleted ✓','#F87171');
-  };
-
-  /* ══ PAYMENT ACTIONS ══ */
-  const savePay=async()=>{
-    if(!pCust||!pAmt){toast_('எல்லாம் fill பண்ணுங்க','#FBBF24');return;}
-    setSyncing(true);
-    const {data:r}=await sb.from('payments').insert({customer_id:+pCust,amount:+pAmt,date:pDate,method:pMeth}).select().single();
-    if(r) setPays(p=>[r,...p]);
-    setSyncing(false); setModal(null);
-    toast_(`Payment ₹${pAmt} saved ✓`);
-  };
-
-  /* ══ WHATSAPP ══ */
-  const openWA=c=>{ const s=stats[c.id]; setWaModal({cust:c,pending:s.pending,billed:s.amount,paid:s.paid}); };
-
-  const sendWA=async()=>{
-    if(!waModal) return;
-    const {cust,pending,billed,paid}=waModal;
-    const upiLine=upiId?`\n💳 UPI ID: *${upiId}*`:'';
-    const qrLine=qrImg?`\n📷 QR Code உடனே அனுப்புகிறேன் 👇`:'';
-    const msg=`Hello ${cust.name}! 👋\n\n📋 *Water Can Supply Bill*\n━━━━━━━━━━━━━━━\n🪣 Total Billed : ₹${billed}\n✅ Total Paid   : ₹${paid}\n⏳ *Balance Due  : ₹${pending}*\n━━━━━━━━━━━━━━━${upiLine}${qrLine}\n\nPlease make the payment.\nThank you! 🙏`;
-    const ph=cust.phone.replace(/\D/g,'');
-    window.open(`https://wa.me/91${ph}?text=${encodeURIComponent(msg)}`,'_blank');
-    if(qrImg){
-      setTimeout(async()=>{
-        try{
-          const res=await fetch(qrImg); const blob=await res.blob();
-          const file=new File([blob],'payment_qr.png',{type:'image/png'});
-          if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
-            await navigator.share({title:`QR — ${cust.name}`,files:[file]});
-          } else { const a=document.createElement('a');a.href=qrImg;a.download='payment_qr.png';a.click(); toast_('QR downloaded! WhatsApp-ல send பண்ணுங்க 📤','#22D3EE'); }
-        }catch(e){setQrView(true);}
-      },1200);
-    }
-  };
-
-  /* ══ QR UPLOAD ══ */
-  const handleQR=e=>{
-    const file=e.target.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async ev=>{
-      const b64=ev.target.result;
-      setQrImg(b64);
-      await sb.from('settings').upsert({key:'qr_b64',value:b64});
-      toast_('QR Code uploaded ✓');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const saveUpi=async()=>{
-    await sb.from('settings').upsert({key:'upi_id',value:upiId});
-    toast_('UPI ID saved ✓');
-  };
-
-  /* ══ CSV EXPORT ══ */
-  const exportCSV=()=>{
-    const rows=custs.map(c=>{const s=stats[c.id]||{};return`"${c.name}","${c.phone}","${c.address||''}",${c.price_per_can},${s.cans||0},${s.amount||0},${s.paid||0},${s.pending||0}`;});
-    const blob=new Blob([['Name,Phone,Address,Price/Can,Cans,Amount,Paid,Pending',...rows].join('\n')],{type:'text/csv'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`water_report_${todayStr}.csv`;a.click();
-    toast_('CSV exported ✓');
-  };
-
-  /* ══════════════════════════
-     MODAL ELEMENTS
-  ══════════════════════════ */
-  const closeBtn=(
-    <button onClick={()=>setModal(null)} style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:24,width:44,height:44,fontSize:22,cursor:'pointer',color:'#E2F0FB',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>✕</button>
-  );
-
-  /* Customer Modal */
-  const custModal = modal==='cust'&&(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:200,backdropFilter:'blur(6px)'}}>
-      <div className="su sheet">
-        <div className="sheet-handle"/>
-        <div className="sheet-head"><span style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800}}>{cId?'✏️ Edit Customer':'➕ New Customer'}</span>{closeBtn}</div>
-        <div className="sheet-body" style={{marginTop:20}}>
-          <div className="field"><label>Customer Name</label><input className="finput" value={cName} onChange={e=>setCName(e.target.value)} placeholder="e.g. Rajesh Kumar"/></div>
-          <div className="field"><label>Phone Number</label><input className="finput" type="tel" value={cPhone} onChange={e=>setCPhone(e.target.value)} placeholder="10-digit number"/></div>
-          <div className="field"><label>Address</label><input className="finput" value={cAddr} onChange={e=>setCAddr(e.target.value)} placeholder="Street, Area, City"/></div>
-          <div className="field"><label>Price per 20L Can (₹)</label><input className="finput" type="number" min="1" value={cPrice} onChange={e=>setCPrice(e.target.value)}/></div>
-          <div className="field"><label>Status</label>
-            <div style={{display:'flex',gap:10}}>
-              <button onClick={()=>setCAt(true)}  className="btn" style={{flex:1,background:cAct?'rgba(74,222,128,0.15)':'rgba(255,255,255,0.05)',color:cAct?'#4ADE80':'#6A96B8',border:`1.5px solid ${cAct?'rgba(74,222,128,0.4)':'rgba(255,255,255,0.1)'}`}}>✅ Active</button>
-              <button onClick={()=>setCAt(false)} className="btn" style={{flex:1,background:!cAct?'rgba(248,113,113,0.15)':'rgba(255,255,255,0.05)',color:!cAct?'#F87171':'#6A96B8',border:`1.5px solid ${!cAct?'rgba(248,113,113,0.4)':'rgba(255,255,255,0.1)'}`}}>❌ Inactive</button>
-            </div>
-          </div>
-          <div style={{display:'flex',gap:10,marginTop:4}}>
-            <button className="btn" onClick={()=>setModal(null)} style={{flex:1,background:'rgba(255,255,255,0.07)',color:'#E2F0FB'}}>Cancel</button>
-            <button className="btn" onClick={saveCust} disabled={syncing} style={{flex:2,background:'#22D3EE',color:'#060E1C',opacity:syncing?0.7:1}}>{syncing?'Saving...':cId?'💾 Save Changes':'➕ Add Customer'}</button>
-          </div>
-        </div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40"><path d="M14,4 h12 v6 a4,4 0 0 1 4,4 v20 a4,4 0 0 1 -4,4 h-12 a4,4 0 0 1 -4,-4 v-20 a4,4 0 0 1 4,-4 z" fill="#106B77"/><rect x="14" y="4" width="12" height="4" rx="1.5" fill="#C97D3C"/></svg>
+      </span>
+      <div class="brand-text">
+        <p class="brand-eyebrow">குடிநீர் விநியோகம்</p>
+        <h1>Lakshmi Water Supply</h1>
       </div>
     </div>
-  );
+    <span id="headerDate" style="font-size:12.5px;font-weight:600;color:#3A5B60;"></span>
+  </header>
 
-  /* Delivery Modal */
-  const selCDel=custs.find(c=>c.id===+dCust);
-  const calcAmt=selCDel?selCDel.price_per_can*(+dCans||0):0;
-  const delModal = modal==='del'&&(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:200,backdropFilter:'blur(6px)'}}>
-      <div className="su sheet">
-        <div className="sheet-handle"/>
-        <div className="sheet-head"><span style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800}}>{dId?'✏️ Edit Delivery':'🚚 Add Delivery'}</span>{closeBtn}</div>
-        <div className="sheet-body" style={{marginTop:20}}>
-          <div className="field"><label>Select Customer</label>
-            <select className="finput" value={dCust} onChange={e=>setDCust(e.target.value)}>
-              <option value="">— Select Customer —</option>
-              {custs.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <div className="field"><label>Cans</label><input className="finput" type="number" min="1" value={dCans} onChange={e=>setDCans(e.target.value)}/></div>
-            <div className="field"><label>Date</label><input className="finput" type="date" value={dDate} onChange={e=>setDDate(e.target.value)}/></div>
-          </div>
-          {selCDel&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'rgba(34,211,238,0.1)',border:'1px solid rgba(34,211,238,0.25)',borderRadius:13,padding:'14px 18px',marginBottom:16}}>
-            <div><div style={{fontSize:13,color:'#6A96B8'}}>Auto-calculated</div><div style={{fontSize:12,color:'#314E68',marginTop:2}}>{dCans} × ₹{selCDel.price_per_can}</div></div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:30,color:'#22D3EE'}}>₹{calcAmt}</div>
-          </div>}
-          <div style={{display:'flex',gap:10}}>
-            <button className="btn" onClick={()=>setModal(null)} style={{flex:1,background:'rgba(255,255,255,0.07)',color:'#E2F0FB'}}>Cancel</button>
-            <button className="btn" onClick={saveDel} disabled={syncing} style={{flex:2,background:'#22D3EE',color:'#060E1C',opacity:syncing?0.7:1}}>{syncing?'Saving...':`💾 ${dId?'Update':'Save'} Delivery`}</button>
-          </div>
+  <div class="wrap">
+
+    <div class="stat-strip">
+      <div class="stat-box"><div class="num" id="statCans">0</div><div class="label">Cans today</div></div>
+      <div class="stat-box"><div class="num" id="statAmount">₹0</div><div class="label">Collected today</div></div>
+    </div>
+
+    <section class="card">
+      <p class="section-title">Log a delivery</p>
+
+      <div class="customer-row">
+        <select id="customerSelect">
+          <option value="">Select customer</option>
+        </select>
+        <button type="button" class="add-customer-btn" id="toggleAddCustomer" aria-label="Add new customer">+</button>
+      </div>
+
+      <div class="new-customer-form" id="newCustomerForm">
+        <input type="text" id="newName" placeholder="Customer name">
+        <input type="tel" id="newPhone" placeholder="Phone (optional)" inputmode="numeric" maxlength="10">
+        <input type="text" id="newAddress" placeholder="Address (optional)">
+        <div class="row-btns">
+          <button type="button" class="cancel-btn" id="cancelAddCustomer">Cancel</button>
+          <button type="button" class="save-customer-btn" id="saveCustomer">Save customer</button>
         </div>
       </div>
-    </div>
-  );
 
-  /* Payment Modal */
-  const selCPay=custs.find(c=>c.id===+pCust);
-  const custPend=selCPay?(stats[selCPay.id]?.pending||0):0;
-  const payModal = modal==='pay'&&(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:200,backdropFilter:'blur(6px)'}}>
-      <div className="su sheet">
-        <div className="sheet-handle"/>
-        <div className="sheet-head"><span style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800}}>💳 Record Payment</span>{closeBtn}</div>
-        <div className="sheet-body" style={{marginTop:20}}>
-          <div className="field"><label>Select Customer</label>
-            <select className="finput" value={pCust} onChange={e=>setPCust(e.target.value)}>
-              <option value="">— Select Customer —</option>
-              {custs.map(c=>{const s=stats[c.id]||{};return<option key={c.id} value={c.id}>{c.name}{s.pend
+      <p class="section-title" style="margin-top:18px;">Can price</p>
+      <div class="price-buttons">
+        <button type="button" class="price-btn" data-price="28">₹28</button>
+        <button type="button" class="price-btn" data-price="30">₹30</button>
+        <button type="button" class="price-btn" data-price="35">₹35</button>
+      </div>
+
+      <p class="section-title" style="margin-top:18px;">Number of cans</p>
+      <div class="stepper">
+        <button type="button" id="qtyMinus" aria-label="Decrease">−</button>
+        <span id="qtyValue">1</span>
+        <button type="button" id="qtyPlus" aria-label="Increase">+</button>
+      </div>
+
+      <div class="date-input-wrap">
+        <label for="deliveryDate">Date</label>
+        <input type="date" id="deliveryDate">
+      </div>
+
+      <p class="error" id="formError" role="alert" aria-live="polite"></p>
+
+      <button type="button" class="submit-btn" id="saveDeliveryBtn" style="margin-top:16px;">
+        <span class="spinner"></span>
+        <span class="btn-label">Save delivery</span>
+      </button>
+    </section>
+
+    <section style="margin-top:24px;">
+      <p class="section-title">Today's log</p>
+      <div class="card log-list" id="logList">
+        <p class="empty-note">No deliveries logged yet today.</p>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  // ------------------------------------------------------------------
+  // SUPABASE CONFIG — paste your project's values here
+  // ------------------------------------------------------------------
+  const SUPABASE_URL = "PASTE YOUR SUPABASE PROJECT URL HERE";
+  const SUPABASE_ANON_KEY = "PASTE YOUR SUPABASE ANON PUBLIC KEY HERE";
+
+  const supabaseReady = !SUPABASE_URL.startsWith("PASTE") && !SUPABASE_ANON_KEY.startsWith("PASTE");
+  const supabase = supabaseReady
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+  function todayStr(){
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  document.getElementById('headerDate').textContent =
+    new Date().toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' });
+
+  const customerSelect = document.getElementById('customerSelect');
+  const toggleAddCustomer = document.getElementById('toggleAddCustomer');
+  const newCustomerForm = document.getElementById('newCustomerForm');
+  const cancelAddCustomer = document.getElementById('cancelAddCustomer');
+  const saveCustomerBtn = document.getElementById('saveCustomer');
+  const priceButtons = document.querySelectorAll('.price-btn');
+  const qtyValueEl = document.getElementById('qtyValue');
+  const dateInput = document.getElementById('deliveryDate');
+  const formError = document.getElementById('formError');
+  const saveDeliveryBtn = document.getElementById('saveDeliveryBtn');
+  const logList = document.getElementById('logList');
+  const statCans = document.getElementById('statCans');
+  const statAmount = document.getElementById('statAmount');
+  const toast = document.getElementById('toast');
+
+  let qty = 1;
+  let selectedPrice = null;
+  let todayDeliveries = [];
+
+  dateInput.value = todayStr();
+
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(()=> toast.classList.remove('show'), 1800);
+  }
+  function showError(msg){ formError.textContent = msg; }
+
+  // ---- Customers ----
+  async function loadCustomers(){
+    if (!supabaseReady) return;
+    const { data, error } = await supabase.from('customers').select('id,name').order('name');
+    if (error){ console.error(error); return; }
+    customerSelect.innerHTML = '<option value="">Select customer</option>' +
+      data.map(c => `<option value="${c.id}" data-name="${c.name.replace(/"/g,'&quot;')}">${c.name}</option>`).join('');
+  }
+
+  toggleAddCustomer.addEventListener('click', () => {
+    newCustomerForm.classList.toggle('show');
+  });
+  cancelAddCustomer.addEventListener('click', () => {
+    newCustomerForm.classList.remove('show');
+    document.getElementById('newName').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newAddress').value = '';
+  });
+  saveCustomerBtn.addEventListener('click', async () => {
+    const name = document.getElementById('newName').value.trim();
+    const phone = document.getElementById('newPhone').value.trim();
+    const address = document.getElementById('newAddress').value.trim();
+    if (!name){ showError('Enter customer name.'); return; }
+    if (!supabaseReady){ showError('Database not connected yet.'); return; }
+    showError('');
+    const { data, error } = await supabase.from('customers')
+      .insert({ name, phone: phone || null, address: address || null })
+      .select().single();
+    if (error){ console.error(error); showError('Could not save customer.'); return; }
+    await loadCustomers();
+    customerSelect.value = data.id;
+    newCustomerForm.classList.remove('show');
+    document.getElementById('newName').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newAddress').value = '';
+    showToast(`${name} added`);
+  });
+
+  // ---- Price buttons ----
+  priceButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      priceButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedPrice = parseInt(btn.dataset.price, 10);
+    });
+  });
+
+  // ---- Quantity stepper ----
+  document.getElementById('qtyMinus').addEventListener('click', () => {
+    qty = Math.max(1, qty - 1); qtyValueEl.textContent = qty;
+  });
+  document.getElementById('qtyPlus').addEventListener('click', () => {
+    qty = Math.min(50, qty + 1); qtyValueEl.textContent = qty;
+  });
+
+  // ---- Save delivery ----
+  saveDeliveryBtn.addEventListener('click', async () => {
+    showError('');
+    const custOption = customerSelect.selectedOptions[0];
+    const customerId = customerSelect.value;
+    if (!customerId){ showError('Select a customer.'); return; }
+    if (!selectedPrice){ showError('Choose a can price.'); return; }
+    if (!supabaseReady){ showError('Database not connected yet.'); return; }
+
+    saveDeliveryBtn.classList.add('loading');
+    saveDeliveryBtn.disabled = true;
+
+    const { data, error } = await supabase.from('deliveries').insert({
+      customer_id: customerId,
+      customer_name: custOption.dataset.name,
+      can_price: selectedPrice,
+      quantity: qty,
+      delivery_date: dateInput.value || todayStr()
+    }).select().single();
+
+    saveDeliveryBtn.classList.remove('loading');
+    saveDeliveryBtn.disabled = false;
+
+    if (error){ console.error(error); showError('Could not save. Try again.'); return; }
+
+    if (data.delivery_date === todayStr()){
+      todayDeliveries.unshift(data);
+      renderLog();
+    }
+    showToast('Delivery saved');
+
+    customerSelect.value = '';
+    priceButtons.forEach(b => b.classList.remove('active'));
+    selectedPrice = null;
+    qty = 1; qtyValueEl.textContent = qty;
+    dateInput.value = todayStr();
+  });
+
+  // ---- Today's log ----
+  function renderLog(){
+    if (todayDeliveries.length === 0){
+      logList.innerHTML = '<p class="empty-note">No deliveries logged yet today.</p>';
+      statCans.textContent = '0';
+      statAmount.textContent = '₹0';
+      return;
+    }
+    let cans = 0, amount = 0;
+    logList.innerHTML = todayDeliveries.map(d => {
+      cans += d.quantity;
+      amount += d.total;
+      const time = new Date(d.created_at).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+      return `<div class="log-item" data-id="${d.id}">
+        <div>
+          <div class="who">${d.customer_name}</div>
+          <div class="meta">${d.quantity} can${d.quantity>1?'s':''} × ₹${d.can_price} · ${time}</div>
+        </div>
+        <div style="display:flex;align-items:center;">
+          <span class="amt">₹${d.total}</span>
+          <button class="del" data-id="${d.id}" aria-label="Delete entry">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+    statCans.textContent = cans;
+    statAmount.textContent = `₹${amount}`;
+
+    logList.querySelectorAll('.del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        if (supabaseReady){
+          const { error } = await supabase.from('deliveries').delete().eq('id', id);
+          if (error){ console.error(error); showToast('Could not delete'); return; }
+        }
+        todayDeliveries = todayDeliveries.filter(d => d.id !== id);
+        renderLog();
+      });
+    });
+  }
+
+  async function loadTodayDeliveries(){
+    if (!supabaseReady) return;
+    const { data, error } = await supabase.from('deliveries')
+      .select('*')
+      .eq('delivery_date', todayStr())
+      .order('created_at', { ascending: false });
+    if (error){ console.error(error); return; }
+    todayDeliveries = data;
+    renderLog();
+  }
+
+  loadCustomers();
+  loadTodayDeliveries();
+</script>
+</body>
+</html>
