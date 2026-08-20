@@ -254,9 +254,9 @@
     </section>
 
     <section style="margin-top:24px;">
-      <p class="section-title">Today's log</p>
+      <p class="section-title">All deliveries</p>
       <div class="card log-list" id="logList">
-        <p class="empty-note">No deliveries logged yet today.</p>
+        <p class="empty-note">No deliveries yet.</p>
       </div>
     </section>
 
@@ -268,8 +268,8 @@
   // ------------------------------------------------------------------
   // SUPABASE CONFIG — paste your project's values here
   // ------------------------------------------------------------------
-  const SUPABASE_URL = "https://negosgsjiniutnejytye.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_lgmS1R7tP3g0NWcd5DgLng_6rwtnHf0";
+  const SUPABASE_URL = "PASTE YOUR SUPABASE PROJECT URL HERE";
+  const SUPABASE_ANON_KEY = "PASTE YOUR SUPABASE ANON PUBLIC KEY HERE";
 
   const supabaseReady = !SUPABASE_URL.startsWith("PASTE") && !SUPABASE_ANON_KEY.startsWith("PASTE");
   const supabase = supabaseReady
@@ -445,11 +445,11 @@
     });
   }
 
-  async function loadTodayDeliveries(){
+  async function loadAllDeliveries(){
     if (!supabaseReady) return;
     const { data, error } = await supabase.from('deliveries')
       .select('*')
-      .eq('delivery_date', todayStr())
+      .order('delivery_date', { ascending: false })
       .order('created_at', { ascending: false });
     if (error){ console.error(error); return; }
     todayDeliveries = data;
@@ -457,7 +457,7 @@
   }
 
   loadCustomers();
-  loadTodayDeliveries();
+  loadAllDeliveries();
 </script>
 </body>
 </html>
